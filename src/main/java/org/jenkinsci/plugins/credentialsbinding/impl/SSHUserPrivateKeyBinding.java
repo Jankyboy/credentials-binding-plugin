@@ -27,6 +27,7 @@ import com.google.common.collect.ImmutableSet;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
+import hudson.Util;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.util.Secret;
@@ -53,8 +54,8 @@ public class SSHUserPrivateKeyBinding extends MultiBinding<SSHUserPrivateKey> {
     }
 
     @DataBoundSetter
-    public void setUsernameVariable(@Nonnull final String usernameVariable) {
-        this.usernameVariable = usernameVariable;
+    public void setUsernameVariable(@CheckForNull String usernameVariable) {
+        this.usernameVariable = Util.fixEmptyAndTrim(usernameVariable);
     }
 
     @CheckForNull
@@ -63,8 +64,8 @@ public class SSHUserPrivateKeyBinding extends MultiBinding<SSHUserPrivateKey> {
     }
 
     @DataBoundSetter
-    public void setPassphraseVariable(@Nonnull final String passphraseVariable) {
-        this.passphraseVariable = passphraseVariable;
+    public void setPassphraseVariable(@CheckForNull String passphraseVariable) {
+        this.passphraseVariable = Util.fixEmptyAndTrim(passphraseVariable);
     }
 
     @CheckForNull
@@ -76,10 +77,11 @@ public class SSHUserPrivateKeyBinding extends MultiBinding<SSHUserPrivateKey> {
         return SSHUserPrivateKey.class;
     }
 
-    @Override public Set<String> variables() {
+    @Override public Set<String> variables(Run<?, ?> build) throws CredentialNotFoundException {
+        SSHUserPrivateKey sshKey = getCredentials(build);
         Set<String> set = new HashSet<>();
         set.add(keyFileVariable);
-        if (usernameVariable != null) {
+        if (usernameVariable != null && sshKey.isUsernameSecret()) {
             set.add(usernameVariable);
         }
         if (passphraseVariable != null) {
@@ -101,21 +103,22 @@ public class SSHUserPrivateKeyBinding extends MultiBinding<SSHUserPrivateKey> {
         keyFile.write(contents.toString(), "UTF-8");
         keyFile.chmod(0400);
 
-        Map<String, String> map = new LinkedHashMap<>();
-        map.put(keyFileVariable, keyFile.getRemote());
+        Map<String, String> secretValues = new LinkedHashMap<>();
+        Map<String, String> publicValues = new LinkedHashMap<>();
+        secretValues.put(keyFileVariable, keyFile.getRemote());
         if (passphraseVariable != null) {
             Secret passphrase = sshKey.getPassphrase();
             if (passphrase != null) {
-                map.put(passphraseVariable, passphrase.getPlainText());
+                secretValues.put(passphraseVariable, passphrase.getPlainText());
             } else {
-                map.put(passphraseVariable, "");
+                secretValues.put(passphraseVariable, "");
             }
         }
         if (usernameVariable != null) {
-            map.put(usernameVariable, sshKey.getUsername());
+            (sshKey.isUsernameSecret() ? secretValues : publicValues).put(usernameVariable, sshKey.getUsername());
         }
 
-        return new MultiEnvironment(map, keyDir.getUnbinder());
+        return new MultiEnvironment(secretValues, publicValues, keyDir.getUnbinder());
     }
 
     @Symbol("sshUserPrivateKey")

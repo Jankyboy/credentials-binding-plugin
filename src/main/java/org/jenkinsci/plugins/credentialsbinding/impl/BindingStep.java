@@ -29,7 +29,6 @@ import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.console.ConsoleLogFilter;
-import hudson.console.LineTransformationOutputStream;
 import hudson.model.AbstractBuild;
 import hudson.model.Run;
 import hudson.model.TaskListener;
@@ -48,7 +47,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -125,7 +123,8 @@ public final class BindingStep extends Step {
             FilePath workspace = getContext().get(FilePath.class);
             Launcher launcher = getContext().get(Launcher.class);
 
-            Map<String,String> overrides = new LinkedHashMap<>();
+            Map<String,String> secretOverrides = new LinkedHashMap<>();
+            Map<String,String> publicOverrides = new LinkedHashMap<>();
             List<MultiBinding.Unbinder> unbinders = new ArrayList<>();
             for (MultiBinding<?> binding : step.bindings) {
                 if (binding.getDescriptor().requiresWorkspace() &&
@@ -134,17 +133,18 @@ public final class BindingStep extends Step {
                 }
                 MultiBinding.MultiEnvironment environment = binding.bind(run, workspace, launcher, listener);
                 unbinders.add(environment.getUnbinder());
-                overrides.putAll(environment.getValues());
+                secretOverrides.putAll(environment.getSecretValues());
+                publicOverrides.putAll(environment.getPublicValues());
             }
-            if (!overrides.isEmpty()) {
+            if (!secretOverrides.isEmpty()) {
                 boolean unix = launcher != null ? launcher.isUnix() : true;
-                listener.getLogger().println("Masking supported pattern matches of " + overrides.keySet().stream().map(
+                listener.getLogger().println("Masking supported pattern matches of " + secretOverrides.keySet().stream().map(
                     v -> unix ? "$" + v : "%" + v + "%"
                 ).collect(Collectors.joining(" or ")));
             }
             getContext().newBodyInvoker().
-                    withContext(EnvironmentExpander.merge(getContext().get(EnvironmentExpander.class), new Overrider(overrides))).
-                    withContext(BodyInvoker.mergeConsoleLogFilters(getContext().get(ConsoleLogFilter.class), new Filter(overrides.values(), run.getCharset().name()))).
+                    withContext(EnvironmentExpander.merge(getContext().get(EnvironmentExpander.class), new Overrider(secretOverrides, publicOverrides))).
+                    withContext(BodyInvoker.mergeConsoleLogFilters(getContext().get(ConsoleLogFilter.class), new Filter(secretOverrides.values(), run.getCharset().name()))).
                     withCallback(new Callback2(unbinders)).
                     start();
         }
@@ -172,19 +172,34 @@ public final class BindingStep extends Step {
         private static final long serialVersionUID = 1;
 
         private final Map<String,Secret> overrides = new HashMap<String,Secret>();
+        private Map<String, String> publicOverrides;
 
-        Overrider(Map<String,String> overrides) {
+        Overrider(Map<String,String> overrides, Map<String, String> publicOverrides) {
             for (Map.Entry<String,String> override : overrides.entrySet()) {
                 this.overrides.put(override.getKey(), Secret.fromString(override.getValue()));
             }
+            this.publicOverrides = publicOverrides;
         }
 
         @Override public void expand(EnvVars env) throws IOException, InterruptedException {
             for (Map.Entry<String,Secret> override : overrides.entrySet()) {
                 env.override(override.getKey(), override.getValue().getPlainText());
             }
+            for (Map.Entry<String, String> override : publicOverrides.entrySet()) {
+                env.override(override.getKey(), override.getValue());
+            }
         }
 
+        @Override public Set<String> getSensitiveVariables() {
+            return Collections.unmodifiableSet(overrides.keySet());
+        }
+
+        private Object readResolve() {
+            if (publicOverrides == null) {
+                publicOverrides = new HashMap<>();
+            }
+            return this;
+        }
     }
 
     /** Similar to {@code MaskPasswordsOutputStream}. */
@@ -208,31 +223,8 @@ public final class BindingStep extends Step {
             return this;
         }
 
-        @Override public OutputStream decorateLogger(AbstractBuild _ignore, final OutputStream logger) throws IOException, InterruptedException {
-            final Pattern p = Pattern.compile(pattern.getPlainText());
-            return new LineTransformationOutputStream() {
-                @Override protected void eol(byte[] b, int len) throws IOException {
-                    if (!p.toString().isEmpty()) {
-                        Matcher m = p.matcher(new String(b, 0, len, charsetName));
-                        if (m.find()) {
-                            logger.write(m.replaceAll("****").getBytes(charsetName));
-                        } else {
-                            // Avoid byte → char → byte conversion unless we are actually doing something.
-                            logger.write(b, 0, len);
-                        }
-                    } else {
-                        // Avoid byte → char → byte conversion unless we are actually doing something.
-                        logger.write(b, 0, len);
-                    }
-                }
-                @Override public void flush() throws IOException {
-                    logger.flush();
-                }
-                @Override public void close() throws IOException {
-                    super.close();
-                    logger.close();
-                }
-            };
+        @Override public OutputStream decorateLogger(AbstractBuild _ignore, OutputStream logger) throws IOException, InterruptedException {
+            return new SecretPatterns.MaskingOutputStream(logger, () -> Pattern.compile(pattern.getPlainText()), charsetName);
         }
 
     }

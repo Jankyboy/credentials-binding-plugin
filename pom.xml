@@ -5,7 +5,7 @@
   <parent>
     <groupId>org.jenkins-ci.plugins</groupId>
     <artifactId>plugin</artifactId>
-    <version>4.9</version>
+    <version>4.19</version>
     <relativePath />
   </parent>
 
@@ -18,9 +18,9 @@
   </description>
   <url>https://github.com/jenkinsci/credentials-binding-plugin</url>
   <properties>
-    <revision>1.24</revision>
+    <revision>1.28</revision>
     <changelist>-SNAPSHOT</changelist>
-    <jenkins.version>2.164.3</jenkins.version>
+    <jenkins.version>2.235.5</jenkins.version>
     <java.level>8</java.level>
   </properties>
   <licenses>
@@ -54,8 +54,8 @@
     <dependencies>
       <dependency>
         <groupId>io.jenkins.tools.bom</groupId>
-        <artifactId>bom-2.164.x</artifactId>
-        <version>10</version>
+        <artifactId>bom-2.235.x</artifactId>
+        <version>887.vae9c8ac09ff7</version>
         <scope>import</scope>
         <type>pom</type>
       </dependency>
@@ -128,13 +128,13 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>authorize-project</artifactId>
-      <version>1.3.0</version>
+      <version>1.4.0</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.xmlunit</groupId>
       <artifactId>xmlunit-matchers</artifactId>
-      <version>2.7.0</version>
+      <version>2.8.2</version>
       <scope>test</scope>
       <exclusions>
         <exclusion>

@@ -30,9 +30,11 @@ import com.cloudbees.plugins.credentials.domains.Domain;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.FilePath;
 import hudson.Functions;
+import hudson.security.ACL;
 import hudson.util.Secret;
 import org.jenkinsci.plugins.credentialsbinding.MultiBinding;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.cps.SnippetizerTester;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.steps.StepConfigTester;
@@ -47,16 +49,20 @@ import java.io.Serializable;
 import java.util.*;
 
 import static org.junit.Assert.*;
+import org.junit.ClassRule;
+import org.jvnet.hudson.test.BuildWatcher;
 
-public class SSHUserPrivateKeyTest {
+public class SSHUserPrivateKeyBindingTest {
 
     @Rule public RestartableJenkinsRule story = new RestartableJenkinsRule();
+    @ClassRule public static BuildWatcher bw = new BuildWatcher();
     @Rule public TemporaryFolder tmp = new TemporaryFolder();
 
     private static class DummyPrivateKey extends BaseCredentials implements SSHUserPrivateKey, Serializable {
 
         private final String id;
         private final String user;
+        boolean usernameSecret = true;
         private final Secret passphrase;
         private final String keyContent;
 
@@ -96,6 +102,11 @@ public class SSHUserPrivateKeyTest {
             return user;
         }
 
+        @Override
+        public boolean isUsernameSecret() {
+            return usernameSecret;
+        }
+
         @NonNull
         @Override
         public String getDescription() {
@@ -109,20 +120,21 @@ public class SSHUserPrivateKeyTest {
     }
 
     @Test public void configRoundTrip() throws Exception {
-        story.addStep(new Statement() {
-            @Override public void evaluate() throws Throwable {
-                SSHUserPrivateKey c = new DummyPrivateKey("creds", "bob", "secret", "the-key");
-                CredentialsProvider.lookupStores(story.j.jenkins).iterator().next().addCredentials(Domain.global(), c);
-                SSHUserPrivateKeyBinding binding = new SSHUserPrivateKeyBinding("keyFile", "creds");
-                binding.setPassphraseVariable("passphrase");
-                binding.setUsernameVariable("user");
-                BindingStep s = new StepConfigTester(story.j).configRoundTrip(new BindingStep(
-                        Collections.<MultiBinding>singletonList(binding)));
-                story.j.assertEqualDataBoundBeans(s.getBindings(), Collections.singletonList(binding));
-            }
+        story.then(r -> {
+            SnippetizerTester st = new SnippetizerTester(r);
+            SSHUserPrivateKey c = new DummyPrivateKey("creds", "bob", "secret", "the-key");
+            CredentialsProvider.lookupStores(story.j.jenkins).iterator().next().addCredentials(Domain.global(), c);
+            SSHUserPrivateKeyBinding binding = new SSHUserPrivateKeyBinding("keyFile", "creds");
+            BindingStep s = new StepConfigTester(story.j).configRoundTrip(new BindingStep(Collections.<MultiBinding>singletonList(binding)));
+            st.assertRoundTrip(s, "withCredentials([sshUserPrivateKey(credentialsId: 'creds', keyFileVariable: 'keyFile')]) {\n    // some block\n}");
+            r.assertEqualDataBoundBeans(s.getBindings(), Collections.singletonList(binding));
+            binding.setPassphraseVariable("passphrase");
+            binding.setUsernameVariable("user");
+            s = new StepConfigTester(story.j).configRoundTrip(new BindingStep(Collections.<MultiBinding>singletonList(binding)));
+            st.assertRoundTrip(s, "withCredentials([sshUserPrivateKey(credentialsId: 'creds', keyFileVariable: 'keyFile', passphraseVariable: 'passphrase', usernameVariable: 'user')]) {\n    // some block\n}");
+            r.assertEqualDataBoundBeans(s.getBindings(), Collections.singletonList(binding));
         });
     }
-
 
     @Test public void basics() throws Exception {
         final String credentialsId = "creds";
@@ -138,7 +150,6 @@ public class SSHUserPrivateKeyTest {
                 if (Functions.isWindows()) {
                     script =
                         "    bat '''\n"
-                        + "      @echo off\n"
                         + "      echo %THEUSER%:%THEPASS% > out.txt\n"
                         + "      type \"%THEKEY%\" > key.txt"
                         + "    '''\n";
@@ -169,6 +180,7 @@ public class SSHUserPrivateKeyTest {
                 SemaphoreStep.success("basics/1", null);
                 story.j.waitForCompletion(b);
                 story.j.assertBuildStatusSuccess(b);
+                story.j.assertLogNotContains(username, b);
                 story.j.assertLogNotContains(passphrase, b);
                 FilePath out = story.j.jenkins.getWorkspaceFor(p).child("out.txt");
                 assertTrue(out.exists());
@@ -177,6 +189,12 @@ public class SSHUserPrivateKeyTest {
                 FilePath key = story.j.jenkins.getWorkspaceFor(p).child("key.txt");
                 assertTrue(key.exists());
                 assertEquals(keyContent, key.readToString().trim());
+
+                ((DummyPrivateKey) CredentialsProvider.lookupCredentials(SSHUserPrivateKey.class, story.j.jenkins, ACL.SYSTEM, Collections.emptyList()).get(0)).usernameSecret = false;
+                SemaphoreStep.success("basics/2", null);
+                b = story.j.buildAndAssertSuccess(p);
+                story.j.assertLogContains(username, b);
+                story.j.assertLogNotContains(passphrase, b);
             }
         });
     }
@@ -193,7 +211,6 @@ public class SSHUserPrivateKeyTest {
                 if (Functions.isWindows()) {
                     script =
                         "    bat '''\n"
-                        + "      @echo off\n"
                         + "      type \"%THEKEY%\" > key.txt"
                         + "    '''\n";
                 } else {

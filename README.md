@@ -7,7 +7,7 @@ confidential files or strings which you want to be used by a job but
 which should not be kept in its SCM, or even visible from its
 config.xml. Saving these files on the server and referring to them by
 absolute path requires you to have a server login, and does not work on
-slaves. This plugin gives you an easy way to package up all a job’s
+agents. This plugin gives you an easy way to package up all a job’s
 secret files and passwords and access them using a single environment
 variable during the build.
 
@@ -19,9 +19,7 @@ from shell script build steps and so on. (You probably want to start any
 shell script with `set +x`, or batch script with `@echo off`.
 [JENKINS-14731](https://issues.jenkins-ci.org/browse/JENKINS-14731)).
 
-For more details of how this works, check the [Injecting Secrets into
-Jenkins Build
-Jobs](https://cloudbees.zendesk.com/hc/en-us/articles/203802500-Injecting-Secrets-into-Jenkins-Build-Jobs)
+For more details of how this works, check the [Injecting secrets into builds](https://docs.cloudbees.com/docs/cloudbees-ci/latest/cloud-secure-guide/injecting-secrets)
 article at CloudBees.
 
 From a Pipeline job, define your credentials, then check *Snippet
@@ -43,7 +41,19 @@ withCredentials([usernamePassword(credentialsId: 'amazon', usernameVariable: 'US
 }
 ```
 
+#### Note
+
+You should use a single quote (`'`) instead of a double quote (`"`) whenever you can. 
+This is particularly important in Pipelines where a statement may be interpreted by both the Pipeline engine and an external interpreter, such as a Unix shell (`sh`) or Windows Command (`bat`) or Powershell (`ps`). 
+This reduces complications with password masking and command processing. 
+The first step in the above example properly demonstrates this.
+It references an environment variable, so the single-quoted string passes its value unprocessed to the `sh` step, and the shell interprets `$PASSWORD`.
+The next two steps use the basic Pipeline `echo` step.
+The last one needs to use double quotes, so that the [string interpolation](https://en.wikipedia.org/wiki/String_interpolation) is performed by the Pipeline DSL.
+
+For more information, see the Pipeline step reference for [Credentials Binding Plugin](https://www.jenkins.io/doc/pipeline/steps/credentials-binding/).
+
 ## Changelog
 
-See [GitHub Releases](https://github.com/jenkinsci/credentials-binding-plugin/releases) for new releases,
-or the [old changelog](old-changelog.md) for history.
+See [GitHub Releases](https://github.com/jenkinsci/credentials-binding-plugin/releases) for new releases (version 1.20 and newer),
+or the [old changelog](old-changelog.md) for history (version 1.19 and earlier).

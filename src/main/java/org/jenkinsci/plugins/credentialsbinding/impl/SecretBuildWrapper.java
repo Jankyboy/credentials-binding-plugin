@@ -27,7 +27,6 @@ package org.jenkinsci.plugins.credentialsbinding.impl;
 import hudson.Extension;
 import hudson.Launcher;
 import hudson.console.ConsoleLogFilter;
-import hudson.console.LineTransformationOutputStream;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
@@ -43,7 +42,6 @@ import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.*;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @SuppressWarnings({"rawtypes", "unchecked"}) // inherited from BuildWrapper
@@ -88,7 +86,7 @@ public class SecretBuildWrapper extends BuildWrapper {
         for (MultiBinding binding : bindings) {
             MultiBinding.MultiEnvironment e = binding.bind(build, build.getWorkspace(), launcher, listener);
             m.add(e);
-            secrets.addAll(e.getValues().values());
+            secrets.addAll(e.getSecretValues().values());
         }
 
         if (!secrets.isEmpty()) {
@@ -98,7 +96,10 @@ public class SecretBuildWrapper extends BuildWrapper {
         return new Environment() {
             @Override public void buildEnvVars(Map<String,String> env) {
                 for (MultiBinding.MultiEnvironment e : m) {
-                    for (Map.Entry<String,String> pair : e.getValues().entrySet()) {
+                    for (Map.Entry<String,String> pair : e.getSecretValues().entrySet()) {
+                        env.put(pair.getKey(), pair.getValue()./* SECURITY-698 */replace("$", "$$$$"));
+                    }
+                    for (Map.Entry<String,String> pair : e.getPublicValues().entrySet()) {
                         env.put(pair.getKey(), pair.getValue()./* SECURITY-698 */replace("$", "$$$$"));
                     }
                 }
@@ -114,7 +115,11 @@ public class SecretBuildWrapper extends BuildWrapper {
 
     @Override public void makeSensitiveBuildVariables(AbstractBuild build, Set<String> sensitiveVariables) {
         for (MultiBinding binding : bindings) {
-            sensitiveVariables.addAll(binding.variables());
+            try {
+                sensitiveVariables.addAll(binding.variables(build));
+            } catch (CredentialNotFoundException x) {
+                // ignore here (will throw an error later anyway)
+            }
         }
     }
 
@@ -134,36 +139,10 @@ public class SecretBuildWrapper extends BuildWrapper {
             this.charsetName = charsetName;
         }
 
-        @Override public OutputStream decorateLogger(final AbstractBuild build, final OutputStream logger) throws IOException, InterruptedException {
-            return new LineTransformationOutputStream() {
-                Pattern p;
-
-                @Override protected void eol(byte[] b, int len) throws IOException {
-                    if (p == null) {
-                        p = getPatternForBuild(build);
-                    }
-
-                    if (p != null && !p.toString().isEmpty()) {
-                        Matcher m = p.matcher(new String(b, 0, len, charsetName));
-                        if (m.find()) {
-                            logger.write(m.replaceAll("****").getBytes(charsetName));
-                        } else {
-                            // Avoid byte → char → byte conversion unless we are actually doing something.
-                            logger.write(b, 0, len);
-                        }
-                    } else {
-                        // Avoid byte → char → byte conversion unless we are actually doing something.
-                        logger.write(b, 0, len);
-                    }
-                }
-
-                @Override public void flush() throws IOException {
-                    logger.flush();
-                }
-
+        @Override public OutputStream decorateLogger(AbstractBuild build, OutputStream logger) throws IOException, InterruptedException {
+            return new SecretPatterns.MaskingOutputStream(logger, () -> getPatternForBuild(build), charsetName) {
                 @Override public void close() throws IOException {
                     super.close();
-                    logger.close();
                     secretsForBuild.remove(build);
                 }
             };
