@@ -32,6 +32,7 @@ import hudson.Launcher;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 
+import java.io.File;
 import java.io.IOException;
 
 import org.jenkinsci.Symbol;
@@ -50,7 +51,9 @@ public class FileBinding extends AbstractOnDiskBinding<FileCredentials> {
     }
 
     @Override protected final FilePath write(FileCredentials credentials, FilePath dir) throws IOException, InterruptedException {
-        FilePath secret = dir.child(credentials.getFileName());
+        String baseName = new File(credentials.getFileName()).getName();
+
+        FilePath secret = dir.child(baseName);
         secret.copyFrom(credentials.getContent());
         secret.chmod(0400);
         return secret;
