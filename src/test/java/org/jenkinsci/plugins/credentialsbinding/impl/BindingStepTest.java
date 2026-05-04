@@ -423,30 +423,19 @@ class BindingStepTest {
 
     @Issue("JENKINS-38831")
     @Test
-    void testTrackingOfCredential() throws Throwable {
+    void trackingOfCredential() throws Throwable {
         extension.then(r -> {
-            String credentialsId = "creds";
             String secret = "s3cr3t";
-            StringCredentialsImpl credentials = new StringCredentialsImpl(CredentialsScope.GLOBAL, credentialsId, "sample", Secret.fromString(secret));
+            StringCredentialsImpl credentials = new StringCredentialsImpl(CredentialsScope.GLOBAL, "creds", "sample", Secret.fromString(secret));
             Fingerprint fingerprint = CredentialsProvider.getFingerprintOf(credentials);
 
             CredentialsProvider.lookupStores(r.jenkins).iterator().next().addCredentials(Domain.global(), credentials);
             WorkflowJob p = r.jenkins.createProject(WorkflowJob.class, "p");
-            p.setDefinition(new CpsFlowDefinition(""
-                + "def extract(id) {\n"
-                + "  def v\n"
-                + "  withCredentials([[$class: 'StringBinding', credentialsId: id, variable: 'temp']]) {\n"
-                + "    v = env.temp\n"
-                + "  }\n"
-                + "  v\n"
-                + "}\n"
-                + "node {\n"
-                + "  echo \"got: ${extract('" + credentialsId + "')}\"\n"
-                + "}", true));
+            p.setDefinition(new CpsFlowDefinition("echo(/got: ${withCredentials([string(credentialsId: 'creds', variable: 'x')]) {x}}/)", true));
 
             assertThat("No fingerprint created until first use", fingerprint, nullValue());
 
-            r.assertLogContains("got: " + secret, r.assertBuildStatusSuccess(p.scheduleBuild2(0).get()));
+            r.assertLogContains("got: " + secret, r.buildAndAssertSuccess(p));
 
             fingerprint = CredentialsProvider.getFingerprintOf(credentials);
 
