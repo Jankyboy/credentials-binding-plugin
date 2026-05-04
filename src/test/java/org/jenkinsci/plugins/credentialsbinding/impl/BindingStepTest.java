@@ -427,18 +427,16 @@ class BindingStepTest {
         extension.then(r -> {
             String secret = "s3cr3t";
             StringCredentialsImpl credentials = new StringCredentialsImpl(CredentialsScope.GLOBAL, "creds", "sample", Secret.fromString(secret));
-            Fingerprint fingerprint = CredentialsProvider.getFingerprintOf(credentials);
 
             CredentialsProvider.lookupStores(r.jenkins).iterator().next().addCredentials(Domain.global(), credentials);
             WorkflowJob p = r.jenkins.createProject(WorkflowJob.class, "p");
             p.setDefinition(new CpsFlowDefinition("echo(/got: ${withCredentials([string(credentialsId: 'creds', variable: 'x')]) {x}}/)", true));
 
-            assertThat("No fingerprint created until first use", fingerprint, nullValue());
+            assertThat("No fingerprint created until first use", CredentialsProvider.getFingerprintOf(credentials), nullValue());
 
             r.assertLogContains("got: " + secret, r.buildAndAssertSuccess(p));
 
-            fingerprint = CredentialsProvider.getFingerprintOf(credentials);
-
+            Fingerprint fingerprint = CredentialsProvider.getFingerprintOf(credentials);
             assertThat(fingerprint, notNullValue());
             assertThat(fingerprint.getJobs(), hasItem(is(p.getFullName())));
         });
